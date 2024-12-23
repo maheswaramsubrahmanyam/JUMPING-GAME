@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Cube Game</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+        #score {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 24px;
+            font-family: Arial;
+        }
+        #gameOver {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: red;
+            font-size: 48px;
+            font-family: Arial;
+            display: none;
+        }
+        #instructions {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-family: Arial;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0</div>
+    <div id="gameOver">Game Over!</div>
+    <div id="instructions">
+        Camera Controls:<br>
+        Left Mouse: Rotate<br>
+        Right Mouse: Pan<br>
+        Mouse Wheel: Zoom <br>
+        <span style="color:white; font-size: 22px; font-family: 'Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif; text-align: center;">Developed by Maheswaram Subrahmanyam @All Rights Reserved 2024</span>
+    </div>
+    <div id="level" style="
+        position: fixed;
+        top: 40px;
+        left: 10px;
+        color: white;
+        font-size: 24px;
+        font-family: Arial;
+    ">Level: EASY</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Add OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        let scene, camera, renderer, playerCube, targetCube, table, controls;
+        let score = 0;
+        let isGameOver = false;
+
+        // Add game configuration after scene variables
+        const DIFFICULTY_LEVELS = {
+            EASY: {
+                score: 0,
+                speed: 0.1,
+                cubeCount: 1,
+                jumpHeight: 0.2
+            },
+            MEDIUM: {
+                score: 10,
+                speed: 0.15,
+                cubeCount: 2,
+                jumpHeight: 0.25
+            },
+            HARD: {
+                score: 25,
+                speed: 0.2,
+                cubeCount: 2,
+                jumpHeight: 0.3
+            },
+            COMPLEX: {
+                score: 50,
+                speed: 0.25,
+                cubeCount: 3,
+                jumpHeight: 0.35
+            },
+            EXTREME: {
+                score: 100,
+                speed: 0.3,
+                cubeCount: 4,
+                jumpHeight: 0.4
+            }
+        };
+
+        let currentLevel = DIFFICULTY_LEVELS.EASY;
+        let targetCubes = []; // Array to hold multiple target cubes
+
+        // Initialize the game
+        function init() {
+            // Create scene
+            scene = new THREE.Scene();
+            
+            // Add skybox
+            createSkybox();
+
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(15, 10, 15);
+            camera.lookAt(0, 0, 0);
+
+            // Create renderer with preserveDrawingBuffer for proper skybox rendering
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                preserveDrawingBuffer: true
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            // Update OrbitControls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = 30;
+            controls.maxPolarAngle = Math.PI / 2;
+            
+            // Enable smooth rotation for better skybox viewing
+            controls.enableZoom = true;
+            controls.enablePan = true;
+            controls.enableRotate = true;
+            controls.autoRotate = false;
+            controls.autoRotateSpeed = 0.5;
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // Reduced ambient light intensity
+            scene.add(ambientLight);
+
+            // Add directional light with shadows
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(10, 15, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.camera.near = 0.1;
+            directionalLight.shadow.camera.far = 100;
+            directionalLight.shadow.camera.left = -15;
+            directionalLight.shadow.camera.right = 15;
+            directionalLight.shadow.camera.top = 15;
+            directionalLight.shadow.camera.bottom = -15;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+
+            // Create table with better materials
+            const tableGeometry = new THREE.BoxGeometry(10, 0.5, 20);
+            const tableMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x808080,
+                shininess: 50
+            });
+            table = new THREE.Mesh(tableGeometry, tableMaterial);
+            table.receiveShadow = true; // Table receives shadows
+            scene.add(table);
+
+            // Add grid helper
+            const gridHelper = new THREE.GridHelper(30, 30);
+            scene.add(gridHelper);
+
+            // Create player cube (green) with better materials
+            const playerGeometry = new THREE.BoxGeometry(1, 1, 1);
+            const playerMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x00ff00,
+                shininess: 100
+            });
+            playerCube = new THREE.Mesh(playerGeometry, playerMaterial);
+            playerCube.position.set(0, 1, -8);
+            playerCube.castShadow = true; // Player cube casts shadows
+            scene.add(playerCube);
+
+            // Create target cube
+            resetTargetCubes();
+        }
+
+        // Update createTargetCube function to handle multiple cubes
+        function createTargetCube(offset = 0) {
+            const targetGeometry = new THREE.BoxGeometry(1, 1, 1);
+            const targetMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xff0000,
+                shininess: 100
+            });
+            const cube = new THREE.Mesh(targetGeometry, targetMaterial);
+            
+            // Distribute cubes across the table width
+            cube.position.set(
+                Math.random() * 8 - 4,
+                1,
+                9 + offset * 2 // Space out multiple cubes
+            );
+            cube.castShadow = true;
+            scene.add(cube);
+            return cube;
+        }
+
+        // Update level based on score
+        function updateDifficulty() {
+            let newLevel;
+            if (score >= DIFFICULTY_LEVELS.EXTREME.score) {
+                newLevel = DIFFICULTY_LEVELS.EXTREME;
+            } else if (score >= DIFFICULTY_LEVELS.COMPLEX.score) {
+                newLevel = DIFFICULTY_LEVELS.COMPLEX;
+            } else if (score >= DIFFICULTY_LEVELS.HARD.score) {
+                newLevel = DIFFICULTY_LEVELS.HARD;
+            } else if (score >= DIFFICULTY_LEVELS.MEDIUM.score) {
+                newLevel = DIFFICULTY_LEVELS.MEDIUM;
+            } else {
+                newLevel = DIFFICULTY_LEVELS.EASY;
+            }
+
+            // If level changed, update cubes
+            if (newLevel !== currentLevel) {
+                currentLevel = newLevel;
+                resetTargetCubes();
+                updateLevelDisplay();
+            }
+        }
+
+        // Display current level
+        function updateLevelDisplay() {
+            const levelNames = {
+                [DIFFICULTY_LEVELS.EASY.speed]: "EASY",
+                [DIFFICULTY_LEVELS.MEDIUM.speed]: "MEDIUM",
+                [DIFFICULTY_LEVELS.HARD.speed]: "HARD",
+                [DIFFICULTY_LEVELS.COMPLEX.speed]: "COMPLEX",
+                [DIFFICULTY_LEVELS.EXTREME.speed]: "EXTREME"
+            };
+            document.getElementById('level').textContent = `Level: ${levelNames[currentLevel.speed]}`;
+        }
+
+        // Reset and create new target cubes based on current level
+        function resetTargetCubes() {
+            // Remove existing cubes
+            targetCubes.forEach(cube => scene.remove(cube));
+            targetCubes = [];
+            
+            // Create new cubes based on current level
+            for (let i = 0; i < currentLevel.cubeCount; i++) {
+                targetCubes.push(createTargetCube(i));
+            }
+        }
+
+        // Handle keyboard controls
+        document.addEventListener('keydown', (event) => {
+            if (isGameOver) return;
+
+            const speed = 0.5;
+            switch(event.key) {
+                case 'ArrowLeft':
+                    if (playerCube.position.x > -4)
+                        playerCube.position.x -= speed;
+                    break;
+                case 'ArrowRight':
+                    if (playerCube.position.x < 4)
+                        playerCube.position.x += speed;
+                    break;
+                case 'ArrowUp':
+                    if (playerCube.position.z > -9)
+                        playerCube.position.z -= speed;
+                    break;
+                case 'ArrowDown':
+                    if (playerCube.position.z < 9)
+                        playerCube.position.z += speed;
+                    break;
+                case ' ':
+                    if (playerCube.position.y === 1) {
+                        playerCube.userData.jumpVelocity = currentLevel.jumpHeight;
+                    }
+                    break;
+            }
+        });
+
+        // Update game state
+        function update() {
+            if (isGameOver) return;
+
+            controls.update();
+            updateDifficulty();
+
+            // Update all target cubes
+            targetCubes.forEach((cube, index) => {
+                // Move cube with current level speed
+                cube.position.z -= currentLevel.speed;
+
+                // Check collision with player
+                const distance = playerCube.position.distanceTo(cube.position);
+                if (distance < 1) {
+                    gameOver();
+                    return;
+                }
+
+                // Reset cube if it passed the start
+                if (cube.position.z < -9) {
+                    score++;
+                    document.getElementById('score').textContent = `Score: ${score}`;
+                    scene.remove(cube);
+                    targetCubes[index] = createTargetCube(index);
+                }
+            });
+
+            // Handle jumping with current level jump height
+            if (playerCube.userData.jumpVelocity) {
+                playerCube.position.y += playerCube.userData.jumpVelocity;
+                playerCube.userData.jumpVelocity -= 0.01;
+
+                if (playerCube.position.y <= 1) {
+                    playerCube.position.y = 1;
+                    playerCube.userData.jumpVelocity = 0;
+                }
+            }
+        }
+
+        // Game over function
+        function gameOver() {
+            isGameOver = true;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update controls for smooth camera movement
+            controls.update();
+            
+            update();
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Add skybox loading after scene creation
+        function createSkybox() {
+            const loader = new THREE.CubeTextureLoader();
+            const skyboxTexture = loader.load([
+                'https://devday2.s3.ap-south-1.amazonaws.com/Capehill/px.png', // positive x
+                'https://devday2.s3.ap-south-1.amazonaws.com/Capehill/nx.png', // negative x
+                'https://devday2.s3.ap-south-1.amazonaws.com/Capehill/py.png', // positive y
+                'https://devday2.s3.ap-south-1.amazonaws.com/Capehill/ny.png', // negative y
+                'https://devday2.s3.ap-south-1.amazonaws.com/Capehill/pz.png', // positive z
+                'https://devday2.s3.ap-south-1.amazonaws.com/Capehill/nz.png'  // negative z
+            ]);
+            scene.background = skyboxTexture;
+        }
+
+        // Add error handling for skybox loading
+        window.addEventListener('error', function(e) {
+            if (e.target.tagName === 'IMG') {
+                console.error('Error loading skybox texture:', e.target.src);
+            }
+        }, true);
+
+        // Start the game
+        init();
+        animate();
+    </script>
+</body>
+</html>
